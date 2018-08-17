@@ -1,0 +1,51 @@
+enclave {
+    include "sgx_report.h"
+    include "sgx_quote.h"
+    include "sgx_trts.h"
+    include "common_structures.h"
+
+    trusted {
+        public int ecall_new_instance(
+            [in]         const sgx_target_info_t  * target_info_IN,
+            [user_check] sgx_report_t             * report_out,
+            [user_check] struct public_key        * pubkey_out,
+            [user_check] uint8_t                 ** sealed_privkey_out,
+            [user_check] size_t                   * sealed_privkey_len_out
+        );
+
+        public int ecall_mount_instance(
+            [in]         struct public_key * pubkey_IN,
+            [user_check] uint8_t           * sealed_privkey_in,
+                         size_t              sealed_privkey_len);
+
+        public int ecall_wrap_secret(
+            [in]         sgx_quote_t        * other_quote_IN,
+            [in]         struct public_key  * other_quote_pubkey_IN,
+            [user_check] uint8_t            * secret_data_in,
+                         size_t               secret_data_len,
+            [user_check] struct nonce       * nonce_out,
+            [user_check] uint8_t           ** wrapped_secret_out,
+            [user_check] int                * wrapped_secret_len_out);
+
+        public int ecall_unwrap_secret(
+            [in]         sgx_quote_t        * other_quote_IN,
+            [in]         struct public_key  * other_quote_pubkey_IN,
+            [user_check] uint8_t            * wrapped_secret_in,
+                         size_t               wrapped_secret_len,
+            [in]         struct nonce       * nonce_IN,
+            [user_check] uint8_t           ** secret_out,
+            [user_check] int                * secret_len_out);
+    };
+
+    untrusted {
+        // ---------------------- utilities ---------------------
+
+        /* allocates a buffer in untrusted memory */
+        void * ocall_calloc(size_t size);
+
+        /* frees buffer in untrusted memory */
+        void ocall_free([user_check] void * untrusted_ptr);
+
+        void ocall_print([in, string] char * str);
+    };
+};

@@ -1,0 +1,12 @@
+*.o
+*.a
+*.so
+*.swp
+*cscope.out*
+enclave_u.*
+enclave_t.*
+cscope.files
+.DS_Store
+cscope.in.out
+cscope.po.out
+*.orig
