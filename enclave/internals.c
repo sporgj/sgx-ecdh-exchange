@@ -56,7 +56,7 @@ unseal_data(uint8_t * data, size_t size, size_t * p_unsealed_len)
     uint8_t           * unsealed_data = nexus_malloc(unsealed_len);
 
     {
-        int ret = sgx_unseal_data(sealed_data, NULL, 0, unsealed_data, (uint32_t *)p_unsealed_len);
+        int ret = sgx_unseal_data(sealed_data, NULL, 0, unsealed_data, &unsealed_len);
 
         if (ret != 0) {
             nexus_free(unsealed_data);
@@ -65,7 +65,9 @@ unseal_data(uint8_t * data, size_t size, size_t * p_unsealed_len)
         }
     }
 
-    return (uint8_t *)sealed_data;
+    *p_unsealed_len = unsealed_len;
+
+    return (uint8_t *)unsealed_data;
 }
 
 int
@@ -91,8 +93,8 @@ validate_quote_and_copy_pubkey(sgx_quote_t * quote, struct public_key * quote_pu
 
 
     /* check the quote provenance */
-    if (memcmp(&owner_body->mr_enclave, &owner_body->mr_enclave, sizeof(sgx_measurement_t))
-        || memcmp(&owner_body->mr_signer, &owner_body->mr_signer, sizeof(sgx_measurement_t))) {
+    if (memcmp(&owner_body->mr_enclave, &other_body->mr_enclave, sizeof(sgx_measurement_t))
+        || memcmp(&owner_body->mr_signer, &other_body->mr_signer, sizeof(sgx_measurement_t))) {
         log_error("enclave provenance check failed\n");
         return -1;
     }
@@ -110,8 +112,6 @@ validate_quote_and_copy_pubkey(sgx_quote_t * quote, struct public_key * quote_pu
         }
     }
 
-    memcpy(&global_other_pubkey, quote_pubkey, sizeof(struct public_key));
-
     return 0;
 }
 
@@ -123,35 +123,24 @@ encrypt_data(struct public_key  * pk,
              int                * out_len,
              struct nonce       * nonce)
 {
-    uint8_t   ekey[crypto_box_BEFORENMBYTES] = { 0 };
+    int total_len        = crypto_box_ZEROBYTES + in_len;
 
-    uint8_t * plaintext                      = NULL;
+    uint8_t * plaintext  = nexus_malloc(total_len);
 
-    uint8_t * ciphertext                     = NULL;
+    uint8_t * ciphertext = nexus_malloc(total_len);
 
-    // the first 16 byte are the MAC
-    int ciphertext_len                       = crypto_box_ZEROBYTES + in_len;
-
-
-    if (crypto_box_beforenm(ekey, pk->bytes, sk->bytes)) {
-        log_error("crypto_box_beforenm FAILED\n");
-        goto err;
-    }
-
-    plaintext  = nexus_malloc(ciphertext_len);
-    ciphertext = nexus_malloc(ciphertext_len);
 
     memcpy(plaintext + crypto_box_ZEROBYTES, data, in_len);
 
     // performs some salsal operation
-    if (crypto_box_afternm(ciphertext, plaintext, ciphertext_len, (uint8_t *)&nonce, ekey)) {
-        log_error("crypto_box_afternm FAILED\n");
+    if (crypto_box(ciphertext, plaintext, total_len, (uint8_t *)nonce, pk->bytes, sk->bytes)) {
+        log_error("crypto_box FAILED\n");
         goto err;
     }
 
     nexus_free(plaintext);
 
-    *out_len = ciphertext_len;
+    *out_len = total_len;
 
     return ciphertext;
 
@@ -166,39 +155,28 @@ uint8_t *
 decrypt_data(struct public_key  * pk,
              struct secret_key  * sk,
              uint8_t            * data,
-             size_t               in_len,
+             size_t               total_len,
              int                * plain_len,
+             int                * offset,
              struct nonce       * nonce)
 {
-    uint8_t   ekey[crypto_box_BEFORENMBYTES] = { 0 };
+    uint8_t * plaintext  = nexus_malloc(total_len);
 
-    uint8_t * plaintext                      = NULL;
-
-    uint8_t * ciphertext                     = NULL;
-
-    // the first 16 byte are the MAC
-    int ciphertext_len                       = in_len;
+    uint8_t * ciphertext = nexus_malloc(total_len);
 
 
-    if (crypto_box_beforenm(ekey, pk->bytes, sk->bytes)) {
-        log_error("crypto_box_beforenm FAILED\n");
-        goto err;
-    }
-
-    plaintext  = nexus_malloc(ciphertext_len);
-    ciphertext = nexus_malloc(ciphertext_len);
-
-    memcpy(ciphertext + crypto_box_ZEROBYTES, data, in_len);
+    memcpy(ciphertext, data, total_len);
 
     // runs the salsa stream cipher
-    if (crypto_box_afternm(plaintext, ciphertext, ciphertext_len, (uint8_t *)nonce, ekey)) {
-        log_error("crypto_box_afternm FAILED\n");
+    if (crypto_box_open(plaintext, ciphertext, total_len, (uint8_t *)nonce, pk->bytes, sk->bytes)) {
+        log_error("crypto_box_open FAILED\n");
         goto err;
     }
 
     nexus_free(ciphertext);
 
-    *plain_len = ciphertext_len - crypto_box_ZEROBYTES;
+    *plain_len = total_len - crypto_box_ZEROBYTES;
+    *offset = crypto_box_ZEROBYTES;
 
     return plaintext;
 

@@ -4,17 +4,14 @@
  * This is Free Sotfware.
  */
 
+#include "untrusted_header.h"
+
 // -------------------------- utilities -----------------------
 
 void *
 ocall_calloc(size_t size)
 {
-    void * ptr = calloc(1, size);
-    if (ptr == NULL) {
-        log_error("allocation error");
-    }
-
-    return ptr;
+    return nexus_malloc(size);
 }
 
 void

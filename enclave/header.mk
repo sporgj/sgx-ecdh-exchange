@@ -1,6 +1,7 @@
 SGX_SDK ?= /opt/intel/sgxsdk
-SGX_MODE ?= SIM
+SGX_MODE ?= HW
 SGX_ARCH ?= x64
+SGX_DEBUG ?= 1
 
 ifeq ($(shell getconf LONG_BIT), 32)
 	SGX_ARCH := x86
@@ -38,6 +39,15 @@ else
 	Trts_Library_Name := sgx_trts
 	Service_Library_Name := sgx_tservice
 endif
+
+
+ifneq ($(SGX_MODE), HW)
+	Urts_Library_Name := sgx_urts_sim
+else
+	Urts_Library_Name := sgx_urts
+endif
+
+
 Crypto_Library_Name := sgx_tcrypto
 
 Enclave_Include_Paths := -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/stlport

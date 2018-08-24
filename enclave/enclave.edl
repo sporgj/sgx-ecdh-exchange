@@ -7,7 +7,7 @@ enclave {
     trusted {
         public int ecall_new_instance(
             [in]         const sgx_target_info_t  * target_info_IN,
-            [user_check] sgx_report_t             * report_out,
+            [out]        sgx_report_t             * report_out,
             [user_check] struct public_key        * pubkey_out,
             [user_check] uint8_t                 ** sealed_privkey_out,
             [user_check] size_t                   * sealed_privkey_len_out
@@ -19,17 +19,17 @@ enclave {
                          size_t              sealed_privkey_len);
 
         public int ecall_wrap_secret(
-            [in]         sgx_quote_t        * other_quote_IN,
-            [in]         struct public_key  * other_quote_pubkey_IN,
+            [user_check] sgx_quote_t        * other_quote_in,
+            [in]         struct public_key  * other_pubkey_IN,
             [user_check] uint8_t            * secret_data_in,
                          size_t               secret_data_len,
+            [out]        struct public_key  * ephemeral_pk_out,
             [user_check] struct nonce       * nonce_out,
             [user_check] uint8_t           ** wrapped_secret_out,
             [user_check] int                * wrapped_secret_len_out);
 
         public int ecall_unwrap_secret(
-            [in]         sgx_quote_t        * other_quote_IN,
-            [in]         struct public_key  * other_quote_pubkey_IN,
+            [in]         struct public_key  * ephemeral_pk_IN,
             [user_check] uint8_t            * wrapped_secret_in,
                          size_t               wrapped_secret_len,
             [in]         struct nonce       * nonce_IN,

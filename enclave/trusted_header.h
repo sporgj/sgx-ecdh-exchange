@@ -28,8 +28,6 @@ extern struct public_key           global_owner_pubkey;
 
 extern struct secret_key           global_owner_privkey;
 
-extern struct public_key           global_other_pubkey;
-
 
 int
 validate_quote_and_copy_pubkey(sgx_quote_t * quote, struct public_key * quote_pubkey);
@@ -75,5 +73,6 @@ decrypt_data(struct public_key  * pk,
              uint8_t            * data,
              size_t               in_len,
              int                * plain_len,
+             int                * offset,
              struct nonce       * nonce);
 

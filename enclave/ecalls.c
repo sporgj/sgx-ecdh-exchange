@@ -5,8 +5,6 @@ struct public_key           global_owner_pubkey;
 
 struct secret_key           global_owner_privkey;
 
-struct public_key           global_other_pubkey;
-
 
 void
 randombytes(void * dest, uint64_t l)
@@ -26,6 +24,8 @@ __copy_to_untrusted(void * trusted_ptr, int len, uint8_t ** untrusted_ptr)
         log_error("allocation failed. err=%x, untrusted_ptr=%p\n", err, ocall_ptr);
         return -1;
     }
+
+    memcpy(ocall_ptr, trusted_ptr, len);
 
     *untrusted_ptr = ocall_ptr;
 
@@ -54,7 +54,7 @@ ecall_new_instance(const sgx_target_info_t  * target_info_IN,
         return -1;
     }
 
-    if (create_quote(&global_owner_pubkey, target_info_IN, report_out)) {
+    if (create_quote_from_pubkey(&global_owner_pubkey, target_info_IN, report_out)) {
         log_error("create_quote() FAILED\n");
         return -1;
     }
@@ -70,7 +70,13 @@ ecall_new_instance(const sgx_target_info_t  * target_info_IN,
             return -1;
         }
 
-        *sealed_privkey_out = result;
+        if (__copy_to_untrusted(result, *sealed_privkey_len_out, sealed_privkey_out)) {
+            nexus_free(result);
+            log_error("could not copy out private key\n");
+            return -1;
+        }
+
+        nexus_free(result);
     }
 
     // copy out the public key
@@ -90,15 +96,13 @@ ecall_mount_instance(struct public_key * pubkey_IN,
 
 
     // copy in the sealed key
-    _sealed_privkey = nexus_malloc(sealed_privkey_len);
-
-    memcpy(_sealed_privkey, sealed_privkey_in, sealed_privkey_len);
+    __copy_from_untrusted(sealed_privkey_in, sealed_privkey_len, &_sealed_privkey);
 
     result = unseal_data(_sealed_privkey, sealed_privkey_len, &unsealed_size);
 
-    if (result == NULL) {
-        nexus_free(result);
+    nexus_free(_sealed_privkey);
 
+    if (result == NULL) {
         log_error("unsealing private key FAILED\n");
         return -1;
     }
@@ -114,10 +118,11 @@ ecall_mount_instance(struct public_key * pubkey_IN,
 }
 
 int
-ecall_wrap_secret(sgx_quote_t        * other_quote_IN,
-                  struct public_key  * other_quote_pubkey_IN,
+ecall_wrap_secret(sgx_quote_t        * other_quote_in,
+                  struct public_key  * other_pubkey_IN,
                   uint8_t            * secret_data_in,
                   size_t               secret_data_len,
+                  struct public_key  * ephemeral_pk_out,
                   struct nonce       * nonce_out,
                   uint8_t           ** wrapped_secret_out,
                   int                * wrapped_secret_len_out)
@@ -130,19 +135,28 @@ ecall_wrap_secret(sgx_quote_t        * other_quote_IN,
 
     struct nonce random_nonce = { 0 };
 
+    struct public_key pk_eph;
+    struct secret_key sk_eph;
 
-    if (validate_quote_and_copy_pubkey(other_quote_IN, other_quote_pubkey_IN)) {
+
+    if (validate_quote_and_copy_pubkey(other_quote_in, other_pubkey_IN)) {
         log_error("could not validate quote/pubkey\n");
         return -1;
     }
 
 
+    // generate the ephermeral keypair
+    if (crypto_box_keypair(pk_eph.bytes, sk_eph.bytes)) {
+        log_error("crypto_box_keypair() FAILED\n");
+        return -1;
+    }
+
     __copy_from_untrusted(secret_data_in, secret_data_len, &secret_data_copy);
 
     randombytes(&random_nonce, sizeof(struct nonce));
 
-    result = encrypt_data(&global_other_pubkey,
-                          &global_owner_privkey,
+    result = encrypt_data(other_pubkey_IN,
+                          &sk_eph,
                           secret_data_copy,
                           secret_data_len,
                           &result_len,
@@ -157,6 +171,7 @@ ecall_wrap_secret(sgx_quote_t        * other_quote_IN,
 
 
     // copy out the nonce and the wrapped secret
+    memcpy(ephemeral_pk_out->bytes, pk_eph.bytes, sizeof(struct public_key));
     memcpy(nonce_out, &random_nonce, sizeof(struct nonce));
 
     if (__copy_to_untrusted(result, result_len, wrapped_secret_out)) {
@@ -175,8 +190,7 @@ err:
 }
 
 int
-ecall_unwrap_secret(sgx_quote_t        * other_quote_IN,
-                    struct public_key  * other_quote_pubkey_IN,
+ecall_unwrap_secret(struct public_key  * ephemeral_pk_IN,
                     uint8_t            * wrapped_secret_in,
                     size_t               wrapped_secret_len,
                     struct nonce       * nonce_IN,
@@ -186,23 +200,19 @@ ecall_unwrap_secret(sgx_quote_t        * other_quote_IN,
     uint8_t * result     = NULL;
 
     int       result_len = 0;
+    int       offset     = 0;
 
     uint8_t * wrapped_secret_copy = NULL;
 
 
-    if (validate_quote_and_copy_pubkey(other_quote_IN, other_quote_pubkey_IN)) {
-        log_error("could not validate quote/pubkey\n");
-        return -1;
-    }
-
-
     __copy_from_untrusted(wrapped_secret_in, wrapped_secret_len, &wrapped_secret_copy);
 
-    result = decrypt_data(&global_other_pubkey,
+    result = decrypt_data(ephemeral_pk_IN,
                           &global_owner_privkey,
                           wrapped_secret_copy,
                           wrapped_secret_len,
                           &result_len,
+                          &offset,
                           nonce_IN);
 
     nexus_free(wrapped_secret_copy);
@@ -214,7 +224,7 @@ ecall_unwrap_secret(sgx_quote_t        * other_quote_IN,
 
 
     // copy out the nonce and the wrapped secret
-    if (__copy_to_untrusted(result, result_len, secret_out)) {
+    if (__copy_to_untrusted(result + offset, result_len, secret_out)) {
         log_error("could not copy data out\n");
         goto err;
     }
